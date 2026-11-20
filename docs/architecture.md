@@ -139,3 +139,38 @@ second agent, and a person approving the large ones.
 |---|---|---|
 | Page | `app/support/page.tsx` | The "Refund Console" title and nothing else yet, linked from the header as Support |
 | Chat panel | `components/copper/ask-copper.tsx` | With the `docked` prop it starts open and the page beside it stays clickable. It is the same single agent and tools as on the home page |
+
+## Module 4: Refunds with a second agent and a person
+
+**Summary:** On the Support page, Copper hands refund requests to a second
+agent, the Refund agent. The Refund agent asks the app for a refund; code
+compares the amount with the auto-refund limit and either refunds it now or
+holds it in the Refund Console until a person clicks Approve or Reject.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Orders and the rule | `lib/copper/refunds.ts` | Maya Reyes's four orders, `DEFAULT_LIMIT_USD` (50) and `decideRefund()`: at or under the limit → `refunded`; over it → `waiting_for_approval`; unknown, refunded or waiting orders → `not_refundable`. No AI in this file |
+| Handoff | `lib/copper/assistant/ask.ts` | When the panel sends `refunds` (orders + limit), Copper also gets `transfer_to_refund_agent` and stops when it calls it (`hasToolCall`). Then a second `callStream` runs the Refund agent on the same conversation; its steps are tagged `agent: "refund"` and a `handoff` step marks the switch |
+| Refund agent | `lib/copper/assistant/refund-agent.ts` | Its own instructions and tools: `list_orders` and `issue_refund` (which runs `decideRefund()`) |
+| Instructions | `lib/copper/assistant/instructions.ts` | `REFUND_HANDOFF_INSTRUCTIONS`, added to Copper's only on the Support page: hand off refund requests, keep answering refund-policy questions with `search_docs` |
+| Console state | `components/copper/refunds-context.tsx` | `RefundsProvider`: the limit, the orders and the waiting refunds, shared by the console and the chat. Approve/Reject update the order and send the chat a message for the customer |
+| Console | `components/copper/refund-console.tsx`, `app/support/page.tsx` | Auto-refund limit input, "Waiting for your approval" with Approve and Reject, and the orders with their status |
+| Chat panel | `components/copper/ask-copper.tsx` | Sends the orders and limit with each question on the Support page, draws the handoff and the Refund agent's tool cards, applies each `issue_refund` result to the console, and shows decision messages signed by the Refund agent |
+| AI calls | `{ module: 2, feature: "ask-copper" }`, then `{ module: 4, feature: "refund-agent" }` | One streamed call for Copper, plus one for the Refund agent when Copper hands off |
+
+**Data flow:** customer asks for a refund → Copper calls
+`transfer_to_refund_agent` → Refund agent calls `list_orders`, then
+`issue_refund` → `decideRefund()` compares the amount with the limit →
+`refunded` (console marks it refunded) or `waiting_for_approval` (console lists
+it) → a person clicks Approve (refunded) or Reject (stays paid) → the chat tells
+the customer.
+
+**Decisions and trade-offs:** The limit check is code, not the model, so a
+persuasive customer can't talk the agent past it. The console's state lives in
+the browser (React state), so it works on Vercel with no database, but it
+resets on reload and each visitor has their own console; a real app would keep
+refunds in a database. Each new question starts with Copper, which hands off
+again if it's about a refund.
+
+**Risks and open questions:** No real money moves: "refunded" is a status. The
+customer is fixed (Maya Reyes) because there's no sign-in yet.
