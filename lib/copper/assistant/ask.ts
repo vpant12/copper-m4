@@ -47,6 +47,9 @@ const MAX_STEPS = 5;
 
 const SORRY = "Sorry, something went wrong on my end. Please try again.";
 
+/** A model call that runs longer than this is stopped and tried again once. */
+const AGENT_TIMEOUT_MS = 45_000;
+
 /** Copper's handoff tool: it does nothing itself except say who takes over. */
 const handoffTool = tool({
   description:
@@ -86,24 +89,26 @@ export async function askCopper({
 
   // Without tools, send no instructions either: "always use your tools" with
   // no tools makes the model answer with nothing.
-  const copper = callStream(
-    { module: 2, feature: "ask-copper" },
-    {
-      messages,
-      providerOptions: THOUGHT_SUMMARIES,
-      ...(useTools && {
-        instructions: canHandOff
-          ? `${COPPER_INSTRUCTIONS}\n\n${REFUND_HANDOFF_INSTRUCTIONS}`
-          : COPPER_INSTRUCTIONS,
-        tools: canHandOff
-          ? { ...copperTools, [HANDOFF_TOOL]: handoffTool }
-          : copperTools,
-        stopWhen: canHandOff
-          ? [stepCountIs(MAX_STEPS), hasToolCall(HANDOFF_TOOL)]
-          : stepCountIs(MAX_STEPS),
-      }),
-    },
-  );
+  const copper = (abortSignal: AbortSignal) =>
+    callStream(
+      { module: 2, feature: "ask-copper" },
+      {
+        messages,
+        abortSignal,
+        providerOptions: THOUGHT_SUMMARIES,
+        ...(useTools && {
+          instructions: canHandOff
+            ? `${COPPER_INSTRUCTIONS}\n\n${REFUND_HANDOFF_INSTRUCTIONS}`
+            : COPPER_INSTRUCTIONS,
+          tools: canHandOff
+            ? { ...copperTools, [HANDOFF_TOOL]: handoffTool }
+            : copperTools,
+          stopWhen: canHandOff
+            ? [stepCountIs(MAX_STEPS), hasToolCall(HANDOFF_TOOL)]
+            : stepCountIs(MAX_STEPS),
+        }),
+      },
+    );
 
   /** Reads one agent's stream into `progress`. True if it handed off. */
   async function follow(
@@ -172,27 +177,55 @@ export async function askCopper({
     return handedOff;
   }
 
+  /**
+   * Runs one agent, giving up on a call that takes longer than AGENT_TIMEOUT_MS
+   * and trying once more. (A call to Google occasionally stalls without ever
+   * failing, which would leave the chat "thinking" forever.) A retry is safe:
+   * the refund rule gives the same answer again, and the console ignores a
+   * refund it already has.
+   */
+  async function run(
+    start: (signal: AbortSignal) => ReturnType<typeof callStream>,
+    agent: Agent,
+  ): Promise<boolean> {
+    for (let attempt = 1; ; attempt++) {
+      const signal = AbortSignal.timeout(AGENT_TIMEOUT_MS);
+      try {
+        const handedOff = await follow(start(signal), agent);
+        if (!signal.aborted) return handedOff;
+      } catch (error) {
+        if (!signal.aborted) throw error;
+      }
+      if (attempt === 2) throw new Error(`${agent} timed out twice`);
+      progress.reply = "";
+    }
+  }
+
   // Read the streams in the background, so the panel gets the first update now.
   void (async () => {
     try {
-      const handedOff = await follow(copper, "copper");
+      const handedOff = await run(copper, "copper");
       if (handedOff && refunds) {
         // The Refund agent writes the reply; anything Copper said first is dropped.
         progress.steps.push({ type: "handoff", from: "copper", to: "refund" });
         progress.reply = "";
         progress.agent = "refund";
         update(snapshot());
-        const refundAgent = callStream(
-          { module: 4, feature: "refund-agent" },
-          {
-            messages,
-            instructions: REFUND_AGENT_INSTRUCTIONS,
-            tools: refundTools(refunds),
-            stopWhen: stepCountIs(MAX_STEPS),
-            providerOptions: THOUGHT_SUMMARIES,
-          },
+        await run(
+          (abortSignal) =>
+            callStream(
+              { module: 4, feature: "refund-agent" },
+              {
+                messages,
+                abortSignal,
+                instructions: REFUND_AGENT_INSTRUCTIONS,
+                tools: refundTools(refunds),
+                stopWhen: stepCountIs(MAX_STEPS),
+                providerOptions: THOUGHT_SUMMARIES,
+              },
+            ),
+          "refund",
         );
-        await follow(refundAgent, "refund");
       }
       progress.status = "done";
       if (!progress.reply.trim()) progress.reply = SORRY;

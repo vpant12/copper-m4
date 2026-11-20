@@ -634,7 +634,8 @@ function ToolCard({ step, number }: { step: ToolStep; number: number }) {
       </div>
       <div className="space-y-2 px-3 py-3">
         <p className="text-muted-foreground flex items-center gap-1 text-[11px] font-semibold tracking-widest uppercase">
-          <ArrowRightIcon className="size-3" /> What Copper sent
+          <ArrowRightIcon className="size-3" /> What{" "}
+          {step.agent === "refund" ? "the Refund agent" : "Copper"} sent
         </p>
         {step.input === undefined ? (
           <p className="text-muted-foreground text-xs italic">
