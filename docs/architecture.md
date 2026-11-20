@@ -173,4 +173,11 @@ refunds in a database. Each new question starts with Copper, which hands off
 again if it's about a refund.
 
 **Risks and open questions:** No real money moves: "refunded" is a status. The
-customer is fixed (Maya Reyes) because there's no sign-in yet.
+customer is fixed (Maya Reyes) because there's no sign-in yet. One refund
+takes about four model requests (Copper, then the Refund agent's steps), and
+Google's free tier is small: Gemini 2.5 Flash isn't offered to new keys, and
+Gemini 3 Flash allows 20 requests a day. The deployment sets
+`AI_MODEL=google/gemini-3.1-flash-lite` (added to `lib/ai/models.ts`), which has
+its own, larger quota. Each request is retried up to 4 times (2–16 s apart),
+and an agent call that stalls for 75 s is restarted once, so a busy minute
+slows an answer down instead of failing it.
