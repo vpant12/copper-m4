@@ -12,6 +12,13 @@ export const MODELS = [
     label: "Gemini 3 Flash (newer, thinks out loud less often)",
     googleId: "gemini-3-flash-preview",
   },
+  {
+    // Added in Module 4: its own free-tier quota is much larger than Gemini 3
+    // Flash's (20 requests a day), and one refund takes about four requests.
+    id: "google/gemini-3.1-flash-lite",
+    label: "Gemini 3.1 Flash-Lite (fastest, largest free quota)",
+    googleId: "gemini-3.1-flash-lite",
+  },
 ] as const;
 
 export type ModelId = (typeof MODELS)[number]["id"];
