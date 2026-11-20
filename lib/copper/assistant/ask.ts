@@ -48,7 +48,14 @@ const MAX_STEPS = 5;
 const SORRY = "Sorry, something went wrong on my end. Please try again.";
 
 /** A model call that runs longer than this is stopped and tried again once. */
-const AGENT_TIMEOUT_MS = 45_000;
+const AGENT_TIMEOUT_MS = 75_000;
+
+/**
+ * Google's free tier turns away bursts of requests ("quota exceeded"), and one
+ * refund needs several. Each request is retried this many times, waiting 2, 4,
+ * 8 and 16 seconds, so a busy minute slows the answer down instead of failing it.
+ */
+const MAX_RETRIES = 4;
 
 /** Copper's handoff tool: it does nothing itself except say who takes over. */
 const handoffTool = tool({
@@ -95,6 +102,7 @@ export async function askCopper({
       {
         messages,
         abortSignal,
+        maxRetries: MAX_RETRIES,
         providerOptions: THOUGHT_SUMMARIES,
         ...(useTools && {
           instructions: canHandOff
@@ -218,6 +226,7 @@ export async function askCopper({
               {
                 messages,
                 abortSignal,
+                maxRetries: MAX_RETRIES,
                 instructions: REFUND_AGENT_INSTRUCTIONS,
                 tools: refundTools(refunds),
                 stopWhen: stepCountIs(MAX_STEPS),
